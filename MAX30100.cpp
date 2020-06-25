@@ -26,6 +26,8 @@ SOFTWARE.
 
 #include "MAX30100.h"
 
+#define FLEXIPLOT_DRIVER
+
 MAX30100::MAX30100(
         Mode mode, 
         SamplingRate samplingRate, 
@@ -37,18 +39,20 @@ MAX30100::MAX30100(
   this->debug = debug;
   currentPulseDetectorState = PULSE_IDLE;
 
+  reset();
+  printRegisters();
   setMode(  mode );
 
   //Check table 8 in datasheet on page 19. You can't just throw in sample rate and pulse width randomly. 100hz + 1600us is max for that resolution
   setSamplingRate( samplingRate );
-  setLEDPulseWidth( pulseWidth );
+  //setLEDPulseWidth( pulseWidth );
 
   redLEDCurrent = (uint8_t)STARTING_RED_LED_CURRENT;
   lastREDLedCurrentCheck = 0;
 
   this->IrLedCurrent = IrLedCurrent;
   setLEDCurrents(redLEDCurrent, IrLedCurrent );
-  setHighresModeEnabled(highResMode);
+  //setHighresModeEnabled(highResMode);
 
 
   dcFilterIR.w = 0;
@@ -63,9 +67,9 @@ MAX30100::MAX30100(
   lpbFilterIR.result = 0;
 
   meanDiffIR.index = 0;
-  meanDiffIR.sum = 0;
+  meanDiffIR.values[0] = 0.0f;
+  meanDiffIR.sum = 0.0f;
   meanDiffIR.count = 0;
-
 
   valuesBPM[0] = 0;
   valuesBPMSum = 0;
@@ -109,6 +113,14 @@ pulseoxymeter_t MAX30100::update()
   irACValueSqSum += dcFilterIR.result * dcFilterIR.result;
   redACValueSqSum += dcFilterRed.result * dcFilterRed.result;
   samplesRecorded++;
+
+#ifdef FLEXIPLOT_DRIVER
+  Serial.print("{P2|meanDiffIR|0,0,255|");
+  Serial.print(meanDiffResIR);
+  Serial.print("|lpbFilterIR|255,0,0|");
+  Serial.print(lpbFilterIR.result);
+  Serial.println("}");
+#endif  
 
   if( detectPulse( lpbFilterIR.result ) && samplesRecorded > 0 )
   {
@@ -329,10 +341,16 @@ void MAX30100::readFrom(byte address, int num, byte _buff[])
   Wire.endTransmission(); // end transmission
 }
 
+void MAX30100::reset(void)
+{
+  //byte currentModeReg = readRegister( MAX30100_MODE_CONF );
+  writeRegister( MAX30100_MODE_CONF, 0x40 );
+}
+
 void MAX30100::setMode(Mode mode)
 {
-  byte currentModeReg = readRegister( MAX30100_MODE_CONF );
-  writeRegister( MAX30100_MODE_CONF, (currentModeReg & 0xF8) | mode );
+  //byte currentModeReg = readRegister( MAX30100_MODE_CONF );
+  writeRegister( MAX30100_MODE_CONF, (mode));
 }
 
 void MAX30100::setHighresModeEnabled(bool enabled)
@@ -347,8 +365,8 @@ void MAX30100::setHighresModeEnabled(bool enabled)
 
 void MAX30100::setSamplingRate(SamplingRate rate)
 {
-  byte currentSpO2Reg = readRegister( MAX30100_SPO2_CONF );
-  writeRegister( MAX30100_SPO2_CONF, ( currentSpO2Reg & 0xE3 ) | (rate<<2) );
+  //byte currentSpO2Reg = readRegister( MAX30100_SPO2_CONF );
+  writeRegister( MAX30100_SPO2_CONF, 0x27 );
 }
 
 void MAX30100::setLEDPulseWidth(LEDPulseWidth pw)
@@ -359,7 +377,8 @@ void MAX30100::setLEDPulseWidth(LEDPulseWidth pw)
 
 void MAX30100::setLEDCurrents( byte redLedCurrent, byte IRLedCurrent )
 {
-  writeRegister( MAX30100_LED_CONF, (redLedCurrent << 4) | IRLedCurrent );
+  writeRegister( MAX30100_LED_CONF1, 0x24);
+  writeRegister( MAX30100_LED_CONF2, 0x24);
 }
 
 float MAX30100::readTemperature()
@@ -379,10 +398,15 @@ fifo_t MAX30100::readFIFO()
 {
   fifo_t result;
 
-  byte buffer[4];
-  readFrom( MAX30100_FIFO_DATA, 4, buffer );
-  result.rawIR = (buffer[0] << 8) | buffer[1];
-  result.rawRed = (buffer[2] << 8) | buffer[3];
+  byte buffer[6];
+  readFrom( MAX30100_FIFO_DATA, 6, buffer );
+  result.rawIR = ((buffer[0] << 16) | (buffer[1] << 8) | buffer[2]) & 0x03FFFF;
+  result.rawRed = ((buffer[3] << 16) | (buffer[4] << 8) | buffer[5]) & 0x03FFFF;
+
+  Serial.print(" IR= ");
+  Serial.print(result.rawIR);
+  Serial.print(" RED= ");
+  Serial.println(result.rawRed);
 
   return result;
 }
@@ -411,11 +435,21 @@ void MAX30100::lowPassButterworthFilter( float x, butterworthFilter_t * filterRe
 
 float MAX30100::meanDiff(float M, meanDiffFilter_t* filterValues)
 {
-  float avg = 0;
+  float avg = 0; 
 
-  filterValues->sum -= filterValues->values[filterValues->index];
-  filterValues->values[filterValues->index] = M;
+  Serial.print("sum_before = ");
+  Serial.print(filterValues->sum);
+  if (filterValues->count == MEAN_FILTER_SIZE) {
+    filterValues->sum -= filterValues->values[filterValues->index];
+  }
+  Serial.print(" sum- = ");
+  Serial.print(filterValues->sum);
+  filterValues->values[filterValues->index] = (int32_t)M;
+  Serial.print(" value = ");
+  Serial.print(filterValues->values[filterValues->index]);  
   filterValues->sum += filterValues->values[filterValues->index];
+  Serial.print(" sum+ = ");
+  Serial.println(filterValues->sum);
 
   filterValues->index++;
   filterValues->index = filterValues->index % MEAN_FILTER_SIZE;
@@ -423,24 +457,58 @@ float MAX30100::meanDiff(float M, meanDiffFilter_t* filterValues)
   if(filterValues->count < MEAN_FILTER_SIZE)
     filterValues->count++;
 
-  avg = filterValues->sum / filterValues->count;
+  avg = (float)filterValues->sum / filterValues->count;
+
+#ifdef FLEXIPLOT_DRIVER
+  Serial.print("{P3|meanDiffValue|0,0,255|");
+  Serial.print(filterValues->values[filterValues->index]);
+  Serial.print("|meanDiffIndex|255,0,0|");
+  Serial.print(filterValues->index);
+  Serial.print("|meanDiffCount|255,0,0|");
+  Serial.print(filterValues->count);
+  Serial.print("|meanDiffSum|255,0,0|");
+  Serial.print(filterValues->sum);
+  Serial.print("|meanDiffAverage|255,0,0|");
+  Serial.print(avg);
+  Serial.print("|meanDiffReturn|255,0,0|");
+  Serial.print(avg-M);
+  Serial.println("}");
+#endif  
+  
   return avg - M;
 }
 
 void MAX30100::printRegisters()
 {
+  Serial.println();
+  Serial.println("MAX30100 Registers");
+  Serial.print("MAX30100_INT_STATUS = ");
   Serial.println(readRegister(MAX30100_INT_STATUS),  HEX);
+  Serial.print("MAX30100_INT_ENABLE = ");
   Serial.println(readRegister(MAX30100_INT_ENABLE),  HEX);
+  Serial.print("MAX30100_FIFO_WRITE = ");
   Serial.println(readRegister(MAX30100_FIFO_WRITE), HEX);
+  Serial.print("MAX30100_FIFO_OVERFLOW_COUNTER = ");
   Serial.println(readRegister(MAX30100_FIFO_OVERFLOW_COUNTER), HEX);
+  Serial.print("MAX30100_FIFO_READ = ");
   Serial.println(readRegister(MAX30100_FIFO_READ), HEX);
+  Serial.print("MAX30100_FIFO_DATA = ");
   Serial.println(readRegister(MAX30100_FIFO_DATA),   HEX);
+  Serial.print("MAX30100_MODE_CONF = ");
   Serial.println(readRegister(MAX30100_MODE_CONF), HEX);
+  Serial.print("MAX30100_SPO2_CONF = ");
   Serial.println(readRegister(MAX30100_SPO2_CONF), HEX);
-  Serial.println(readRegister(MAX30100_LED_CONF),  HEX);
+  Serial.print("MAX30100_LED_CONF1 = ");
+  Serial.println(readRegister(MAX30100_LED_CONF1),  HEX);
+  Serial.print("MAX30100_LED_CONF2 = ");
+  Serial.println(readRegister(MAX30100_LED_CONF2),  HEX);
+  Serial.print("MAX30100_TEMP_INT = ");
   Serial.println(readRegister(MAX30100_TEMP_INT),   HEX);
+  Serial.print("MAX30100_TEMP_FRACTION = ");
   Serial.println(readRegister(MAX30100_TEMP_FRACTION),   HEX);
+  Serial.print("MAX30100_REV_ID = ");
   Serial.println(readRegister(MAX30100_REV_ID),      HEX);
+  Serial.print("MAX30100_PART_ID = ");
   Serial.println(readRegister(MAX30100_PART_ID),     HEX);
+  Serial.println();
 }
-

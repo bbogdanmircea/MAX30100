@@ -94,8 +94,8 @@ typedef enum PulseStateMachine {
 } PulseStateMachine;
 
 struct fifo_t {
-  uint16_t rawIR;
-  uint16_t rawRed;
+  uint32_t rawIR;
+  uint32_t rawRed;
 };
 
 struct dcFilter_t {
@@ -111,9 +111,9 @@ struct butterworthFilter_t
 
 struct meanDiffFilter_t
 {
-  float values[MEAN_FILTER_SIZE];
+  int32_t values[MEAN_FILTER_SIZE];
   byte index;
-  float sum;
+  int32_t sum;
   byte count;
 };
 
@@ -129,15 +129,16 @@ struct meanDiffFilter_t
 #define MAX30100_INT_ENABLE               0x01
 
 //Fifo registers
-#define MAX30100_FIFO_WRITE               0x02
-#define MAX30100_FIFO_OVERFLOW_COUNTER    0x03
-#define MAX30100_FIFO_READ                0x04
-#define MAX30100_FIFO_DATA                0x05
+#define MAX30100_FIFO_WRITE               0x04
+#define MAX30100_FIFO_OVERFLOW_COUNTER    0x05
+#define MAX30100_FIFO_READ                0x06
+#define MAX30100_FIFO_DATA                0x07
 
 //Config registers
-#define MAX30100_MODE_CONF                0x06
-#define MAX30100_SPO2_CONF                0x07
-#define MAX30100_LED_CONF                 0x09
+#define MAX30100_MODE_CONF                0x09
+#define MAX30100_SPO2_CONF                0x0A
+#define MAX30100_LED_CONF1                0x0C
+#define MAX30100_LED_CONF2                0x0D
 
 //Temperature registers
 #define MAX30100_TEMP_INT                 0x16
@@ -206,6 +207,7 @@ class MAX30100
 
     pulseoxymeter_t update();
 
+    void reset();
     void setMode(Mode mode);
     void setHighresModeEnabled(bool enabled);
     void setSamplingRate(SamplingRate rate);

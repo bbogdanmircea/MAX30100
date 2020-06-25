@@ -27,6 +27,8 @@ SOFTWARE.
 #include <math.h>
 #include <Wire.h>
 
+#define FLEXIPLOT
+
 #include "MAX30100.h"
 
 MAX30100* pulseOxymeter;
@@ -36,11 +38,11 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Pulse oxymeter test!");
 
-  //pulseOxymeter = new MAX30100( DEFAULT_OPERATING_MODE, DEFAULT_SAMPLING_RATE, DEFAULT_LED_PULSE_WIDTH, DEFAULT_IR_LED_CURRENT, true, true );
-  pulseOxymeter = new MAX30100();
-  pinMode(2, OUTPUT);
+  pulseOxymeter = new MAX30100( MAX30100_MODE_SPO2_HR, MAX30100_SAMPLING_RATE_100HZ, MAX30100_PULSE_WIDTH_1600US_ADC_16, MAX30100_LED_CURRENT_7_6MA, false, true );
+  //pulseOxymeter = new MAX30100();
+  //pinMode(2, OUTPUT);
 
-  //pulseOxymeter->printRegisters();
+  pulseOxymeter->printRegisters();
 }
 
 void loop() {
@@ -48,7 +50,6 @@ void loop() {
   //You have to call update with frequency at least 37Hz. But the closer you call it to 100Hz the better, the filter will work.
   pulseoxymeter_t result = pulseOxymeter->update();
   
-
   if( result.pulseDetected == true )
   {
     Serial.println("BEAT");
@@ -71,26 +72,23 @@ void loop() {
   
     
   //These are special packets for FlexiPlot plotting tool
+#ifdef FLEXIPLOT
   Serial.print("{P0|IR|0,0,255|");
   Serial.print(result.dcFilteredIR);
   Serial.print("|RED|255,0,0|");
   Serial.print(result.dcFilteredRed);
   Serial.println("}");
   
-  Serial.print("{P1|RED|255,0,255|");
+  Serial.print("{P1|EKG|255,0,255|");
   Serial.print(result.irCardiogram);
   Serial.print("|BEAT|0,0,255|");
   Serial.print(result.lastBeatThreshold);
   Serial.println("}");
-
+#endif
   
 
   delay(10);
 
   //Basic way of determening execution of the loop via oscoliscope
-  digitalWrite( 2, !digitalRead(2) );
+  //digitalWrite( 2, !digitalRead(2) );
 }
-
-
-
-
